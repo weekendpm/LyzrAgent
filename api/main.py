@@ -24,6 +24,24 @@ from workflows.document_workflow import get_workflow, DocumentProcessingWorkflow
 from workflows.state_schema import WorkflowConfig, HumanFeedback
 from api.websocket_manager import WebSocketManager
 
+# LangSmith tracing imports
+try:
+    from langsmith import traceable
+    from langchain.callbacks import LangChainTracer
+    LANGSMITH_AVAILABLE = True
+except ImportError:
+    # Fallback if LangSmith is not available
+    def traceable(name=None):
+        def decorator(func):
+            return func
+        return decorator
+    LANGSMITH_AVAILABLE = False
+
+# Configure LangSmith tracing
+import os
+os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+os.environ.setdefault("LANGCHAIN_PROJECT", "document-processor")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -548,6 +566,7 @@ async def workflow_websocket(websocket: WebSocket, document_id: str):
 
 
 # Background processing functions
+@traceable(name="process_document_background")
 async def process_document_background(
     document_id: str,
     file_path: str,
@@ -608,6 +627,7 @@ async def process_document_background(
         )
 
 
+@traceable(name="process_text_background")
 async def process_text_background(
     document_id: str,
     content: str,
@@ -968,6 +988,7 @@ async def stream_workflow(run_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to setup stream: {str(e)}")
 
 # Background processing function for LangGraph standard workflow
+@traceable(name="process_langgraph_workflow")
 async def process_langgraph_workflow(
     run_id: str,
     thread_id: str,
