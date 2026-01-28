@@ -15,9 +15,8 @@ from pathlib import Path
 # File processing imports
 import PyPDF2
 from docx import Document
-# OCR imports - disabled for Railway deployment
-# from PIL import Image
-# import pytesseract
+from PIL import Image
+import pytesseract
 
 from workflows.state_schema import DocumentProcessingState, AgentResult, add_agent_history_entry, update_agent_result
 

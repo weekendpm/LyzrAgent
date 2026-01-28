@@ -1,230 +1,121 @@
-# 🚀 Lovable Integration Guide - Document Processing Platform
+# 🔗 Lovable Integration Guide
 
-## Quick Start for Lovable
+## Overview
+This FastAPI backend is ready to integrate with Lovable's frontend development platform. The API provides document processing capabilities with 9 AI agents.
 
-Your Document Processing Platform is now **Lovable-ready**! Here's everything you need to integrate it with your Lovable frontend.
+## 🚀 Quick Start for Lovable
 
-## 🔧 Backend Setup (Already Configured)
-
-✅ **CORS configured** for Lovable domains  
-✅ **API endpoints** ready for frontend integration  
-✅ **TypeScript types** generated  
-✅ **WebSocket support** for real-time updates  
-✅ **Docker deployment** ready  
-
-## 🌐 API Base URL
-
-- **Local Development**: `http://localhost:8000`
-- **Production**: Update with your deployed URL
-
-## 📋 Integration Checklist
-
-### 1. Start Your Backend Server
-
+### 1. Backend Setup
 ```bash
-# Option A: Local development
+# Start your FastAPI server
 cd /Users/rudranshtiwri/Code/LyzrAgent
 source venv/bin/activate
-export OPENAI_API_KEY="your-openai-key-here"
+export OPENAI_API_KEY="your-api-key-here"
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Option B: Using the deployment script
-./deploy.sh local
-
-# Option C: Docker deployment
-./deploy.sh docker
 ```
 
-### 2. Verify Backend is Running
+### 2. API Endpoints for Lovable
 
-Visit: `http://localhost:8000/health`
+#### Core Endpoints:
+- `GET /` - API information and available endpoints
+- `GET /health` - Health check
+- `POST /upload-and-process` - Upload file and start processing
+- `GET /simple-status/{document_id}?thread_id={thread_id}` - Simplified status for UI
+- `POST /process-text` - Process text directly
+- `WebSocket /workflow/{document_id}/stream` - Real-time updates
 
-Expected response:
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-01-28T...",
-  "service": "Document Processing Platform"
-}
-```
+#### Example Usage in Lovable:
 
-### 3. API Documentation
-
-Interactive API docs: `http://localhost:8000/docs`
-
-## 🎯 Key Integration Points
-
-### File Upload Component
-
-```typescript
-import { DocumentUploadResponse } from './types/api';
-
-const uploadDocument = async (file: File): Promise<DocumentUploadResponse> => {
+```javascript
+// Upload and process a document
+const uploadDocument = async (file) => {
   const formData = new FormData();
   formData.append('file', file);
   
-  const response = await fetch('http://localhost:8000/process-document', {
+  const response = await fetch('http://localhost:8000/upload-and-process', {
     method: 'POST',
-    body: formData,
+    body: formData
   });
   
-  if (!response.ok) {
-    throw new Error(`Upload failed: ${response.statusText}`);
-  }
-  
-  return response.json();
+  return await response.json();
 };
-```
 
-### Text Processing Component
+// Check processing status
+const checkStatus = async (documentId, threadId) => {
+  const response = await fetch(
+    `http://localhost:8000/simple-status/${documentId}?thread_id=${threadId}`
+  );
+  return await response.json();
+};
 
-```typescript
-import { ProcessTextRequest, DocumentUploadResponse } from './types/api';
-
-const processText = async (text: string): Promise<DocumentUploadResponse> => {
-  const payload: ProcessTextRequest = {
-    text_content: text,
-    document_type: 'txt'
+// WebSocket for real-time updates
+const connectWebSocket = (documentId) => {
+  const ws = new WebSocket(`ws://localhost:8000/workflow/${documentId}/stream`);
+  
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Processing update:', data);
   };
   
-  const response = await fetch('http://localhost:8000/process-text', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-  
-  return response.json();
+  return ws;
 };
 ```
 
-### Real-time Status Updates
+## 🎨 Frontend Integration Examples
 
-```typescript
-import { WorkflowStatusResponse } from './types/api';
+### React Component Example:
+```jsx
+import React, { useState, useEffect } from 'react';
 
-const useDocumentStatus = (threadId: string) => {
-  const [status, setStatus] = useState<WorkflowStatusResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  useEffect(() => {
-    const pollStatus = async () => {
-      try {
-        const response = await fetch(`http://localhost:8000/status/${threadId}`);
-        const statusData = await response.json();
-        setStatus(statusData);
-        
-        if (statusData.is_complete) {
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error('Status check failed:', error);
-      }
-    };
-    
-    const interval = setInterval(pollStatus, 2000);
-    pollStatus(); // Initial call
-    
-    return () => clearInterval(interval);
-  }, [threadId]);
-  
-  return { status, isLoading };
-};
-```
+const DocumentProcessor = () => {
+  const [file, setFile] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [processing, setProcessing] = useState(false);
 
-### WebSocket Integration
-
-```typescript
-import { WebSocketMessage } from './types/api';
-
-const useWebSocket = (documentId: string) => {
-  const [messages, setMessages] = useState<WebSocketMessage[]>([]);
-  const [ws, setWs] = useState<WebSocket | null>(null);
-  
-  useEffect(() => {
-    const websocket = new WebSocket(`ws://localhost:8000/workflow/${documentId}/stream`);
-    
-    websocket.onmessage = (event) => {
-      const message: WebSocketMessage = JSON.parse(event.data);
-      setMessages(prev => [...prev, message]);
-    };
-    
-    websocket.onopen = () => {
-      console.log('WebSocket connected');
-      setWs(websocket);
-    };
-    
-    websocket.onclose = () => {
-      console.log('WebSocket disconnected');
-      setWs(null);
-    };
-    
-    return () => {
-      websocket.close();
-    };
-  }, [documentId]);
-  
-  return { messages, ws };
-};
-```
-
-## 🎨 UI Components Examples
-
-### Document Upload Component
-
-```tsx
-import React, { useState } from 'react';
-import { DocumentUploadResponse } from './types/api';
-
-const DocumentUploader: React.FC = () => {
-  const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<DocumentUploadResponse | null>(null);
-  
   const handleUpload = async () => {
     if (!file) return;
     
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await fetch('http://localhost:8000/process-document', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const result = await response.json();
-      setResult(result);
-    } catch (error) {
-      console.error('Upload failed:', error);
-    } finally {
-      setUploading(false);
+    setProcessing(true);
+    const result = await uploadDocument(file);
+    
+    if (result.success) {
+      // Start polling for status
+      pollStatus(result.document_id, result.thread_id);
     }
   };
-  
+
+  const pollStatus = async (documentId, threadId) => {
+    const interval = setInterval(async () => {
+      const status = await checkStatus(documentId, threadId);
+      setStatus(status);
+      
+      if (status.is_complete || status.status === 'error') {
+        clearInterval(interval);
+        setProcessing(false);
+      }
+    }, 2000);
+  };
+
   return (
-    <div className="upload-container">
-      <input
-        type="file"
-        accept=".pdf,.docx,.txt,.jpg,.jpeg,.png"
-        onChange={(e) => setFile(e.target.files?.[0] || null)}
+    <div className="document-processor">
+      <input 
+        type="file" 
+        onChange={(e) => setFile(e.target.files[0])}
+        accept=".pdf,.docx,.txt,.jpg,.png"
       />
-      <button 
-        onClick={handleUpload} 
-        disabled={!file || uploading}
-        className="upload-btn"
-      >
-        {uploading ? 'Processing...' : 'Upload Document'}
+      <button onClick={handleUpload} disabled={!file || processing}>
+        {processing ? 'Processing...' : 'Upload & Process'}
       </button>
       
-      {result && (
-        <div className="result">
-          <h3>Processing Started!</h3>
-          <p>Document ID: {result.document_id}</p>
-          <p>Thread ID: {result.thread_id}</p>
-          <p>Status: {result.status}</p>
+      {status && (
+        <div className="status">
+          <h3>Processing Status</h3>
+          <p>Status: {status.status}</p>
+          <p>Progress: {status.progress_percentage}%</p>
+          <p>Current Step: {status.current_step}</p>
+          {status.requires_human_review && (
+            <p>⚠️ Human review required</p>
+          )}
         </div>
       )}
     </div>
@@ -232,128 +123,82 @@ const DocumentUploader: React.FC = () => {
 };
 ```
 
-### Processing Status Component
+## 🔧 Configuration
 
-```tsx
-import React from 'react';
-import { WorkflowStatusResponse } from './types/api';
-
-interface StatusDisplayProps {
-  status: WorkflowStatusResponse;
-}
-
-const StatusDisplay: React.FC<StatusDisplayProps> = ({ status }) => {
-  const getStatusColor = (currentStatus: string) => {
-    switch (currentStatus) {
-      case 'completed': return 'green';
-      case 'failed': return 'red';
-      case 'human_review_required': return 'orange';
-      case 'processing': return 'blue';
-      default: return 'gray';
-    }
-  };
-  
-  return (
-    <div className="status-display">
-      <div className="status-header">
-        <h3>Processing Status</h3>
-        <span 
-          className="status-badge"
-          style={{ backgroundColor: getStatusColor(status.current_status) }}
-        >
-          {status.current_status}
-        </span>
-      </div>
-      
-      <div className="status-details">
-        <p><strong>Current Agent:</strong> {status.current_agent || 'None'}</p>
-        <p><strong>Next Agent:</strong> {status.next_agent || 'None'}</p>
-        <p><strong>Complete:</strong> {status.is_complete ? 'Yes' : 'No'}</p>
-        <p><strong>Can Continue:</strong> {status.can_continue ? 'Yes' : 'No'}</p>
-      </div>
-      
-      {status.human_interaction && Object.keys(status.human_interaction).length > 0 && (
-        <div className="human-review-section">
-          <h4>Human Review Required</h4>
-          <pre>{JSON.stringify(status.human_interaction, null, 2)}</pre>
-        </div>
-      )}
-    </div>
-  );
-};
+### Environment Variables:
+```env
+OPENAI_API_KEY=sk-your-openai-key
+LLM_PROVIDER=openai
+OPENAI_MODEL=gpt-4
 ```
 
-## 🔒 Security & Environment
-
-### Environment Variables
-
-Make sure these are set in your deployment:
-
-```bash
-OPENAI_API_KEY=your-openai-api-key-here
-ANTHROPIC_API_KEY=your-anthropic-api-key-here  # Optional
-```
-
-### CORS Configuration
-
-Already configured for:
+### CORS Configuration:
+The API is configured to work with:
 - `http://localhost:3000` (local development)
 - `https://*.lovable.dev` (Lovable preview)
 - `https://*.lovableproject.com` (Lovable production)
 
-## 🚀 Deployment Options
+## 📊 Response Formats
 
-### Option 1: Local Development
-```bash
-./deploy.sh local
+### Simple Status Response:
+```json
+{
+  "document_id": "uuid",
+  "status": "processing|completed|error",
+  "progress_percentage": 75.0,
+  "current_step": "extraction_agent",
+  "is_complete": false,
+  "requires_human_review": true,
+  "error": null
+}
 ```
 
-### Option 2: Docker
-```bash
-./deploy.sh docker
+### Upload Response:
+```json
+{
+  "success": true,
+  "document_id": "uuid",
+  "thread_id": "thread_uuid_timestamp",
+  "filename": "document.pdf",
+  "status": "processing",
+  "message": "Document uploaded and processing started"
+}
 ```
 
-### Option 3: Manual
-```bash
-source venv/bin/activate
-export OPENAI_API_KEY="your-key"
-uvicorn api.main:app --host 0.0.0.0 --port 8000
-```
+## 🔄 Real-time Updates
 
-## 📊 Supported Features
+WebSocket messages include:
+- `processing_started` - Processing began
+- `agent_completed` - Individual agent finished
+- `processing_completed` - All processing done
+- `processing_error` - Error occurred
+- `human_review_required` - Manual review needed
 
-✅ **File Upload**: PDF, DOCX, TXT, JPG, JPEG, PNG  
-✅ **Text Processing**: Direct text input  
-✅ **Real-time Updates**: WebSocket support  
-✅ **Human Review**: Interactive review workflow  
-✅ **Multi-agent Processing**: 9 specialized AI agents  
-✅ **Status Tracking**: Real-time progress monitoring  
-✅ **Error Handling**: Comprehensive error responses  
+## 🚀 Deployment
+
+For production deployment with Lovable:
+
+1. Update CORS origins to include your Lovable production URLs
+2. Set environment variables in your deployment platform
+3. Use the health check endpoint (`/health`) for monitoring
+4. Consider rate limiting and authentication for production use
+
+## 📝 API Documentation
+
+Once your server is running, visit:
+- `http://localhost:8000/docs` - Interactive API documentation
+- `http://localhost:8000/redoc` - Alternative documentation format
 
 ## 🛠️ Troubleshooting
 
-### Backend Not Responding
-1. Check if server is running: `curl http://localhost:8000/health`
-2. Verify API key is set: `echo $OPENAI_API_KEY`
-3. Check server logs for errors
-
-### CORS Issues
-- Ensure your Lovable domain is included in the CORS origins
-- Check browser console for CORS errors
-
-### File Upload Issues
-- Verify file type is supported
-- Check file size (no explicit limit set, but consider adding one)
-- Ensure `uploads/` directory exists and is writable
+1. **CORS Issues**: Check that your Lovable URL is in the allowed origins
+2. **API Key Issues**: Ensure `OPENAI_API_KEY` is set correctly
+3. **WebSocket Issues**: Make sure your frontend handles WebSocket reconnection
+4. **File Upload Issues**: Check file size limits and supported formats
 
 ## 📞 Support
 
-- **API Documentation**: `http://localhost:8000/docs`
-- **Health Check**: `http://localhost:8000/health`
-- **Logs**: `docker-compose logs` (if using Docker)
-
-## 🎉 You're Ready!
-
-Your Document Processing Platform is now fully integrated and ready for Lovable! Start building your frontend and connect to the API endpoints above.
-
-**Happy coding! 🚀**
+For issues with the backend integration, check:
+1. Server logs for detailed error messages
+2. API documentation at `/docs`
+3. Health check at `/health`

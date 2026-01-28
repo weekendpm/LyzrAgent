@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Processing Platform - Test Integration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto py-8 px-4">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-3xl font-bold text-gray-900 mb-8 text-center">
+                🚀 Document Processing Platform - Lovable Integration Test
+            </h1>
+            
+            <!-- Upload Section -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-xl font-semibold mb-4">Upload & Process Document</h2>
+                
+                <div class="space-y-4">
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.jpg,.png,.xlsx" class="hidden">
+                        <label for="fileInput" class="cursor-pointer block">
+                            <div class="text-6xl mb-2">📄</div>
+                            <div class="text-lg font-medium text-gray-700" id="fileName">
+                                Choose a file to upload
+                            </div>
+                            <div class="text-sm text-gray-500 mt-1">
+                                Supports PDF, DOCX, TXT, JPG, PNG, XLSX
+                            </div>
+                        </label>
+                    </div>
+                    
+                    <button id="uploadBtn" disabled 
+                            class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors">
+                        Upload & Process Document
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Status Section -->
+            <div id="statusSection" class="bg-white rounded-lg shadow-md p-6 mb-6 hidden">
+                <h2 class="text-xl font-semibold mb-4">Processing Status</h2>
+                
+                <div id="documentInfo" class="mb-4 p-3 bg-blue-50 rounded-lg hidden">
+                    <p class="text-sm text-blue-800"><strong>Document ID:</strong> <span id="docId"></span></p>
+                    <p class="text-sm text-blue-800"><strong>Thread ID:</strong> <span id="threadId"></span></p>
+                    <p class="text-sm text-blue-800"><strong>Filename:</strong> <span id="filename"></span></p>
+                </div>
+                
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm font-medium text-gray-700">
+                            Progress: <span id="progressText">0%</span>
+                        </span>
+                        <span class="text-sm text-gray-500">
+                            Current: <span id="currentStep">-</span>
+                        </span>
+                    </div>
+                    
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div><strong>Status:</strong> <span id="status">-</span></div>
+                        <div><strong>Complete:</strong> <span id="isComplete">No</span></div>
+                    </div>
+                    
+                    <div id="humanReviewAlert" class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg hidden">
+                        <p class="text-yellow-800 font-medium">⚠️ Human Review Required</p>
+                        <p class="text-yellow-700 text-sm">This document requires manual review before completion.</p>
+                    </div>
+                    
+                    <div id="errorAlert" class="p-3 bg-red-50 border border-red-200 rounded-lg hidden">
+                        <p class="text-red-800 font-medium">Error:</p>
+                        <p class="text-red-700 text-sm" id="errorMessage"></p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Results Section -->
+            <div id="resultsSection" class="bg-white rounded-lg shadow-md p-6 hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">Processing Results</h2>
+                    <button id="downloadBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                        📥 Download Results
+                    </button>
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-lg overflow-x-auto">
+                    <pre id="resultsContent" class="text-sm"></pre>
+                </div>
+            </div>
+            
+            <!-- WebSocket Log -->
+            <div class="bg-white rounded-lg shadow-md p-6 mt-6">
+                <h2 class="text-xl font-semibold mb-4">Real-time Updates (WebSocket)</h2>
+                <div id="wsLog" class="bg-gray-900 text-green-400 p-4 rounded-lg h-32 overflow-y-auto font-mono text-sm">
+                    Waiting for WebSocket connection...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let currentWebSocket = null;
+        let currentThreadId = null;
+        let currentDocumentId = null;
+        let statusInterval = null;
+
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const statusSection = document.getElementById('statusSection');
+        const documentInfo = document.getElementById('documentInfo');
+        const resultsSection = document.getElementById('resultsSection');
+        const wsLog = document.getElementById('wsLog');
+
+        // File input handler
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                fileName.textContent = file.name;
+                uploadBtn.disabled = false;
+            } else {
+                fileName.textContent = 'Choose a file to upload';
+                uploadBtn.disabled = true;
+            }
+        });
+
+        // Upload handler
+        uploadBtn.addEventListener('click', async () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            try {
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Processing...';
+                
+                // Upload file
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch(`${API_BASE}/upload-and-process`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentDocumentId = result.document_id;
+                    currentThreadId = result.thread_id;
+                    
+                    // Show document info
+                    document.getElementById('docId').textContent = result.document_id;
+                    document.getElementById('threadId').textContent = result.thread_id;
+                    document.getElementById('filename').textContent = result.filename;
+                    documentInfo.classList.remove('hidden');
+                    statusSection.classList.remove('hidden');
+                    
+                    // Start WebSocket connection
+                    connectWebSocket(result.document_id);
+                    
+                    // Start status polling
+                    startStatusPolling(result.document_id, result.thread_id);
+                    
+                    logWebSocket(`✅ Upload successful: ${result.message}`);
+                } else {
+                    logWebSocket(`❌ Upload failed: ${result.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                logWebSocket(`❌ Upload error: ${error.message}`);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload & Process Document';
+            }
+        });
+
+        // WebSocket connection
+        function connectWebSocket(documentId) {
+            if (currentWebSocket) {
+                currentWebSocket.close();
+            }
+            
+            currentWebSocket = new WebSocket(`ws://localhost:8000/workflow/${documentId}/stream`);
+            
+            currentWebSocket.onopen = () => {
+                logWebSocket('🔗 WebSocket connected');
+            };
+            
+            currentWebSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                logWebSocket(`📨 ${data.type}: ${JSON.stringify(data, null, 2)}`);
+                
+                if (data.type === 'processing_completed') {
+                    fetchResults();
+                }
+            };
+            
+            currentWebSocket.onerror = (error) => {
+                logWebSocket(`❌ WebSocket error: ${error}`);
+            };
+            
+            currentWebSocket.onclose = () => {
+                logWebSocket('🔌 WebSocket disconnected');
+            };
+        }
+
+        // Status polling
+        function startStatusPolling(documentId, threadId) {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+            }
+            
+            statusInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/simple-status/${documentId}?thread_id=${threadId}`);
+                    const status = await response.json();
+                    
+                    updateStatusDisplay(status);
+                    
+                    if (status.is_complete || status.status === 'error') {
+                        clearInterval(statusInterval);
+                        if (status.is_complete) {
+                            fetchResults();
+                        }
+                    }
+                } catch (error) {
+                    logWebSocket(`❌ Status check error: ${error.message}`);
+                }
+            }, 2000);
+        }
+
+        // Update status display
+        function updateStatusDisplay(status) {
+            document.getElementById('progressText').textContent = `${status.progress_percentage.toFixed(1)}%`;
+            document.getElementById('currentStep').textContent = status.current_step;
+            document.getElementById('status').textContent = status.status;
+            document.getElementById('isComplete').textContent = status.is_complete ? 'Yes' : 'No';
+            
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = `${status.progress_percentage}%`;
+            
+            // Update progress bar color
+            if (status.status === 'error') {
+                progressBar.className = 'bg-red-500 h-2 rounded-full transition-all duration-300';
+            } else if (status.is_complete) {
+                progressBar.className = 'bg-green-500 h-2 rounded-full transition-all duration-300';
+            } else {
+                progressBar.className = 'bg-blue-500 h-2 rounded-full transition-all duration-300';
+            }
+            
+            // Show/hide alerts
+            const humanReviewAlert = document.getElementById('humanReviewAlert');
+            const errorAlert = document.getElementById('errorAlert');
+            
+            if (status.requires_human_review) {
+                humanReviewAlert.classList.remove('hidden');
+            } else {
+                humanReviewAlert.classList.add('hidden');
+            }
+            
+            if (status.error) {
+                document.getElementById('errorMessage').textContent = status.error;
+                errorAlert.classList.remove('hidden');
+            } else {
+                errorAlert.classList.add('hidden');
+            }
+        }
+
+        // Fetch results
+        async function fetchResults() {
+            if (!currentThreadId) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/results/${currentThreadId}`);
+                const results = await response.json();
+                
+                document.getElementById('resultsContent').textContent = JSON.stringify(results, null, 2);
+                resultsSection.classList.remove('hidden');
+                
+                logWebSocket('📋 Results fetched successfully');
+            } catch (error) {
+                logWebSocket(`❌ Results fetch error: ${error.message}`);
+            }
+        }
+
+        // Download results
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            const results = document.getElementById('resultsContent').textContent;
+            const blob = new Blob([results], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `results_${currentDocumentId}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        // WebSocket logging
+        function logWebSocket(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            wsLog.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            wsLog.scrollTop = wsLog.scrollHeight;
+        }
+
+        // Test API connection on load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const health = await response.json();
+                logWebSocket(`✅ API connected: ${health.service} (${health.status})`);
+            } catch (error) {
+                logWebSocket(`❌ API connection failed: ${error.message}`);
+                logWebSocket('Make sure your FastAPI server is running on http://localhost:8000');
+            }
+        });
+    </script>
+</body>
+</html>

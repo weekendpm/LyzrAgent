@@ -1,49 +1,31 @@
 """
 FastAPI application for document processing platform.
 Provides REST API and WebSocket endpoints for the document processing workflow.
-LangGraph Cloud compatible with LangSmith tracing.
 """
 
 import asyncio
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import json
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 import uvicorn
 
-# LangSmith tracing imports
-try:
-    from langsmith import traceable
-    from langchain.callbacks import LangChainTracer
-    LANGSMITH_AVAILABLE = True
-except ImportError:
-    # Fallback if LangSmith is not available
-    def traceable(name=None):
-        def decorator(func):
-            return func
-        return decorator
-    LANGSMITH_AVAILABLE = False
-
 # Import workflow components
 from workflows.document_workflow import get_workflow, DocumentProcessingWorkflow
 from workflows.state_schema import WorkflowConfig, HumanFeedback
 from api.websocket_manager import WebSocketManager
 
-# Configure LangSmith tracing
-os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-os.environ.setdefault("LANGCHAIN_PROJECT", "document-processor")
-
 # Configure logging
-log_level = os.environ.get("LOG_LEVEL", "INFO")
-logging.basicConfig(level=getattr(logging, log_level))
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app
@@ -55,25 +37,28 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configure CORS for production and development
+# Add CORS middleware - Production ready
 def get_cors_origins():
-    """Get CORS origins from environment or use defaults"""
-    env_origins = os.environ.get("ALLOWED_ORIGINS", "")
-    if env_origins:
-        return env_origins.split(",")
-    
-    # Default origins for development and Lovable
-    return [
-        "http://localhost:3000",  # Local development
-        "https://*.lovable.dev",  # Lovable preview URLs
-        "https://*.lovableproject.com",  # Lovable production URLs
-        "*" if os.environ.get("ENVIRONMENT") != "production" else ""
-    ]
+    """Get CORS origins for production and Lovable integration"""
+    if os.environ.get("ENVIRONMENT") == "production":
+        return [
+            "https://*.lovable.dev",  # Lovable preview URLs
+            "https://*.lovableproject.com",  # Lovable production URLs
+            "https://lovable.dev",  # Lovable main domain
+            # Add your client's domains here
+        ]
+    else:
+        return [
+            "http://localhost:3000",  # Local development
+            "https://*.lovable.dev",  # Lovable preview URLs
+            "https://*.lovableproject.com",  # Lovable production URLs
+            "https://lovable.dev",  # Lovable main domain
+            "*"  # Allow all for development
+        ]
 
-# Add CORS middleware - Lovable and LangGraph Cloud ready
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin for origin in get_cors_origins() if origin],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -132,6 +117,16 @@ class ProcessingResultResponse(BaseModel):
     processing_time: float
     confidence_scores: Dict[str, float]
 
+class SimpleStatusResponse(BaseModel):
+    """Simplified status response for Lovable frontend"""
+    document_id: str
+    status: str
+    progress_percentage: float
+    current_step: str
+    is_complete: bool
+    requires_human_review: bool
+    error: Optional[str] = None
+
 
 # Dependency to get workflow instance
 def get_workflow_instance() -> DocumentProcessingWorkflow:
@@ -161,31 +156,33 @@ async def startup_event():
     logger.info("Document Processing Platform API started successfully")
 
 
+# Root endpoint for Lovable
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "Document Processing Platform API",
+        "status": "running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "process_document": "/process-document",
+            "process_text": "/process-text",
+            "status": "/status/{thread_id}",
+            "results": "/results/{thread_id}",
+            "websocket": "/workflow/{document_id}/stream"
+        }
+    }
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    try:
-        # Simple health check
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "service": "Document Processing Platform",
-            "version": "1.0.0"
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service unhealthy")
-
-# Simple root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint"""
     return {
-        "message": "Document Processing Platform API",
-        "status": "running",
-        "docs": "/docs",
-        "health": "/health"
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "Document Processing Platform"
     }
 
 
@@ -551,7 +548,6 @@ async def workflow_websocket(websocket: WebSocket, document_id: str):
 
 
 # Background processing functions
-@traceable(name="process_document_background")
 async def process_document_background(
     document_id: str,
     file_path: str,
@@ -612,7 +608,6 @@ async def process_document_background(
         )
 
 
-@traceable(name="process_text_background")
 async def process_text_background(
     document_id: str,
     content: str,
@@ -671,19 +666,376 @@ async def process_text_background(
         )
 
 
-# Development and production server
+# Simplified endpoints for Lovable frontend
+@app.get("/simple-status/{document_id}", response_model=SimpleStatusResponse)
+async def get_simple_status(
+    document_id: str,
+    thread_id: str = Query(..., description="The full thread ID of the workflow"),
+    workflow: DocumentProcessingWorkflow = Depends(get_workflow_instance)
+):
+    """
+    Simplified status endpoint for Lovable frontend
+    """
+    try:
+        status_info = await workflow.get_workflow_status(thread_id)
+        
+        if "error" in status_info:
+            return SimpleStatusResponse(
+                document_id=document_id,
+                status="error",
+                progress_percentage=0.0,
+                current_step="error",
+                is_complete=False,
+                requires_human_review=False,
+                error=status_info["error"]
+            )
+        
+        # Calculate progress percentage based on completed agents
+        completed_agents = len([agent for agent in status_info.get("agent_status", {}).values() 
+                              if agent.get("status") == "completed"])
+        total_agents = 9  # We have 9 agents
+        progress_percentage = (completed_agents / total_agents) * 100
+        
+        return SimpleStatusResponse(
+            document_id=document_id,
+            status=status_info.get("overall_status", "unknown"),
+            progress_percentage=progress_percentage,
+            current_step=status_info.get("current_agent", "unknown"),
+            is_complete=status_info.get("overall_status") == "completed",
+            requires_human_review=status_info.get("human_review_required", False)
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get simple status for {document_id}: {e}")
+        return SimpleStatusResponse(
+            document_id=document_id,
+            status="error",
+            progress_percentage=0.0,
+            current_step="error",
+            is_complete=False,
+            requires_human_review=False,
+            error=str(e)
+        )
+
+@app.post("/upload-and-process")
+async def upload_and_process(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    workflow: DocumentProcessingWorkflow = Depends(get_workflow_instance)
+):
+    """
+    Combined upload and process endpoint for Lovable
+    """
+    try:
+        # Generate document ID
+        document_id = str(uuid.uuid4())
+        timestamp = int(time.time())
+        thread_id = f"thread_{document_id}_{timestamp}"
+        
+        # Save uploaded file
+        upload_dir = "uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{document_id}_{file.filename}")
+        
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Start background processing
+        background_tasks.add_task(
+            process_document_background,
+            document_id,
+            thread_id,
+            file_path,
+            file.filename,
+            workflow
+        )
+        
+        return {
+            "success": True,
+            "document_id": document_id,
+            "thread_id": thread_id,
+            "filename": file.filename,
+            "status": "processing",
+            "message": "Document uploaded and processing started"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to upload and process file: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+# ============================================================================
+# STANDARD LANGGRAPH CLOUD ENDPOINTS (Client-Ready)
+# ============================================================================
+
+class LangGraphInvokeRequest(BaseModel):
+    """Standard LangGraph invoke request format"""
+    input: Dict[str, Any]
+    config: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    stream_mode: Optional[str] = "values"
+
+class LangGraphInvokeResponse(BaseModel):
+    """Standard LangGraph invoke response format"""
+    run_id: str
+    status: str
+    input: Dict[str, Any]
+    output: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any]
+
+class LangGraphRunStatus(BaseModel):
+    """Standard LangGraph run status format"""
+    run_id: str
+    status: str
+    input: Dict[str, Any]
+    output: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+@app.post("/invoke", response_model=LangGraphInvokeResponse)
+async def invoke_workflow(
+    request: LangGraphInvokeRequest,
+    background_tasks: BackgroundTasks,
+    workflow: DocumentProcessingWorkflow = Depends(get_workflow_instance)
+):
+    """
+    Standard LangGraph Cloud /invoke endpoint
+    Starts a document processing workflow
+    """
+    try:
+        # Generate run ID (using document_id format for compatibility)
+        document_id = str(uuid.uuid4())
+        timestamp = int(time.time())
+        run_id = f"run_{document_id}_{timestamp}"
+        thread_id = f"thread_{document_id}_{timestamp}"
+        
+        # Extract input data
+        input_data = request.input
+        text_content = input_data.get("text_content", "")
+        file_type = input_data.get("file_type", "text")
+        
+        if not text_content:
+            raise HTTPException(status_code=400, detail="text_content is required in input")
+        
+        # Store run metadata for status tracking
+        run_metadata = {
+            "run_id": run_id,
+            "thread_id": thread_id,
+            "document_id": document_id,
+            "status": "running",
+            "input": input_data,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        # Start background processing
+        background_tasks.add_task(
+            process_langgraph_workflow,
+            run_id,
+            thread_id,
+            document_id,
+            text_content,
+            file_type,
+            workflow,
+            run_metadata
+        )
+        
+        return LangGraphInvokeResponse(
+            run_id=run_id,
+            status="running",
+            input=input_data,
+            metadata={
+                "document_id": document_id,
+                "thread_id": thread_id,
+                "created_at": run_metadata["created_at"]
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to invoke workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to invoke workflow: {str(e)}")
+
+@app.get("/runs/{run_id}", response_model=LangGraphRunStatus)
+async def get_run_status(
+    run_id: str,
+    workflow: DocumentProcessingWorkflow = Depends(get_workflow_instance)
+):
+    """
+    Standard LangGraph Cloud /runs/{run_id} endpoint
+    Gets the status of a running workflow
+    """
+    try:
+        # Extract thread_id from run_id
+        if not run_id.startswith("run_"):
+            raise HTTPException(status_code=400, detail="Invalid run_id format")
+        
+        # Parse run_id to get thread_id
+        parts = run_id.split("_")
+        if len(parts) < 3:
+            raise HTTPException(status_code=400, detail="Invalid run_id format")
+        
+        document_id = parts[1]
+        timestamp = parts[2]
+        thread_id = f"thread_{document_id}_{timestamp}"
+        
+        # Get workflow status
+        status_info = workflow.get_workflow_status(thread_id)
+        
+        if "error" in status_info:
+            return LangGraphRunStatus(
+                run_id=run_id,
+                status="error",
+                input={},
+                output={"error": status_info["error"]},
+                metadata={"document_id": document_id, "thread_id": thread_id},
+                created_at=datetime.now().isoformat(),
+                updated_at=datetime.now().isoformat()
+            )
+        
+        # Map to standard LangGraph format
+        overall_status = status_info.get("overall_status", "running")
+        langgraph_status = "success" if overall_status == "completed" else overall_status
+        
+        # Get results if completed
+        output_data = None
+        if overall_status == "completed":
+            try:
+                results = workflow.get_workflow_state(thread_id)
+                if results:
+                    output_data = {
+                        "extracted_data": results.get("extracted_data", {}),
+                        "validated_data": results.get("validated_data", {}),
+                        "confidence_scores": results.get("confidence_scores", {}),
+                        "business_rules_applied": results.get("business_rules_applied", []),
+                        "anomalies_detected": results.get("anomalies_detected", []),
+                        "human_review_required": results.get("human_review_required", False)
+                    }
+            except Exception as e:
+                logger.warning(f"Could not get results for {run_id}: {e}")
+        
+        return LangGraphRunStatus(
+            run_id=run_id,
+            status=langgraph_status,
+            input={"document_id": document_id},
+            output=output_data,
+            metadata={
+                "document_id": document_id,
+                "thread_id": thread_id,
+                "progress_percentage": status_info.get("progress_percentage", 0),
+                "current_step": status_info.get("current_agent", "unknown"),
+                "agent_status": status_info.get("agent_status", {}),
+                "human_review_required": status_info.get("human_review_required", False)
+            },
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get run status for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get run status: {str(e)}")
+
+@app.get("/stream/{run_id}")
+async def stream_workflow(run_id: str):
+    """
+    Standard LangGraph Cloud /stream/{run_id} endpoint
+    Streams workflow updates (redirects to WebSocket)
+    """
+    try:
+        # Extract document_id from run_id
+        if not run_id.startswith("run_"):
+            raise HTTPException(status_code=400, detail="Invalid run_id format")
+        
+        parts = run_id.split("_")
+        if len(parts) < 3:
+            raise HTTPException(status_code=400, detail="Invalid run_id format")
+        
+        document_id = parts[1]
+        
+        # Return WebSocket connection info
+        return {
+            "message": "Use WebSocket for streaming",
+            "websocket_url": f"ws://localhost:8000/workflow/{document_id}/stream",
+            "run_id": run_id,
+            "document_id": document_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to setup stream for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to setup stream: {str(e)}")
+
+# Background processing function for LangGraph standard workflow
+async def process_langgraph_workflow(
+    run_id: str,
+    thread_id: str,
+    document_id: str,
+    text_content: str,
+    file_type: str,
+    workflow: DocumentProcessingWorkflow,
+    run_metadata: Dict[str, Any]
+):
+    """Background task for LangGraph standard workflow processing"""
+    try:
+        logger.info(f"Starting LangGraph workflow processing for run: {run_id}")
+        
+        # Notify start via WebSocket
+        await websocket_manager.broadcast_to_document(
+            document_id,
+            {
+                "type": "workflow_started",
+                "run_id": run_id,
+                "document_id": document_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+        # Process using existing workflow
+        result = await workflow.process_document(
+            document_id=document_id,
+            content=text_content,
+            file_type=file_type,
+            metadata={"source": "langgraph_invoke", "run_id": run_id}
+        )
+        
+        # Notify completion via WebSocket
+        await websocket_manager.broadcast_to_document(
+            document_id,
+            {
+                "type": "workflow_completed",
+                "run_id": run_id,
+                "document_id": document_id,
+                "result": result,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+        logger.info(f"LangGraph workflow processing completed for run: {run_id}")
+    
+    except Exception as e:
+        logger.error(f"LangGraph workflow processing failed for run {run_id}: {e}")
+        
+        # Notify error via WebSocket
+        await websocket_manager.broadcast_to_document(
+            document_id,
+            {
+                "type": "workflow_error",
+                "run_id": run_id,
+                "document_id": document_id,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+
+# Development server
 if __name__ == "__main__":
-    # Get port from environment (for cloud deployment)
-    port = int(os.environ.get("PORT", 8000))
-    
-    # Determine if we're in development or production
-    is_development = os.environ.get("ENVIRONMENT") != "production"
-    
     uvicorn.run(
         "api.main:app",
         host="0.0.0.0",
-        port=port,
-        reload=is_development,
-        log_level=os.environ.get("LOG_LEVEL", "info").lower(),
-        workers=1 if is_development else int(os.environ.get("WORKERS", "1"))
+        port=8000,
+        reload=True,
+        log_level="info"
     )

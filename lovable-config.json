@@ -1,0 +1,37 @@
+{
+  "name": "Document Processing Platform",
+  "description": "AI-powered document processing with 9 specialized agents",
+  "backend": {
+    "type": "fastapi",
+    "url": "http://localhost:8000",
+    "endpoints": {
+      "health": "/health",
+      "docs": "/docs",
+      "upload_and_process": "/upload-and-process",
+      "simple_status": "/simple-status/{document_id}",
+      "process_text": "/process-text",
+      "status": "/status/{document_id}",
+      "results": "/results/{thread_id}",
+      "websocket": "/workflow/{document_id}/stream"
+    }
+  },
+  "features": [
+    "Document upload and processing",
+    "Real-time status updates",
+    "9 AI agents (ingestion, classification, extraction, validation, etc.)",
+    "Human review workflow",
+    "WebSocket streaming",
+    "Business rules engine",
+    "Anomaly detection"
+  ],
+  "environment": {
+    "required": [
+      "OPENAI_API_KEY"
+    ],
+    "optional": [
+      "ANTHROPIC_API_KEY",
+      "LLM_PROVIDER",
+      "OPENAI_MODEL"
+    ]
+  }
+}

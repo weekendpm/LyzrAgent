@@ -1,18 +1,15 @@
 """
 Document Processing Workflow using LangGraph.
 Assembles all agents into a coordinated workflow with human-in-the-loop capabilities.
-LangSmith tracing enabled for cloud deployment.
 """
 
 import logging
-import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
-from langsmith import traceable
 
 # Import all agents
 from agents.ingestion_agent import ingestion_agent
