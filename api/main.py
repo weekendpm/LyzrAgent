@@ -20,8 +20,17 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 # LangSmith tracing imports
-from langsmith import traceable
-from langchain.callbacks import LangChainTracer
+try:
+    from langsmith import traceable
+    from langchain.callbacks import LangChainTracer
+    LANGSMITH_AVAILABLE = True
+except ImportError:
+    # Fallback if LangSmith is not available
+    def traceable(name=None):
+        def decorator(func):
+            return func
+        return decorator
+    LANGSMITH_AVAILABLE = False
 
 # Import workflow components
 from workflows.document_workflow import get_workflow, DocumentProcessingWorkflow
@@ -156,10 +165,27 @@ async def startup_event():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    try:
+        # Simple health check
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "service": "Document Processing Platform",
+            "version": "1.0.0"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail="Service unhealthy")
+
+# Simple root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
     return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "service": "Document Processing Platform"
+        "message": "Document Processing Platform API",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health"
     }
 
 
