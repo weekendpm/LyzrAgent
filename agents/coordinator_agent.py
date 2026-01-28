@@ -4,6 +4,7 @@ Determines which agent should run next based on current state.
 """
 
 import logging
+from datetime import datetime
 from typing import Dict, Any, Optional, Literal
 from workflows.state_schema import DocumentProcessingState
 
@@ -379,3 +380,78 @@ def validate_workflow_state(state: DocumentProcessingState) -> Dict[str, Any]:
         validation_result["is_valid"] = False
     
     return validation_result
+
+
+async def coordinator_agent(state: DocumentProcessingState) -> DocumentProcessingState:
+    """
+    Coordinator Agent - Entry point that initializes workflow and determines first agent to run
+    
+    This agent:
+    1. Initializes workflow state if needed
+    2. Determines the first agent to run based on document state
+    3. Sets up workflow metadata and tracking
+    4. Handles initial routing decisions
+    
+    Args:
+        state: Current document processing state
+    
+    Returns:
+        Updated state with coordinator decisions
+    """
+    try:
+        logger.info(f"Coordinator agent starting workflow for document: {state.get('document', {}).get('id', 'unknown')}")
+        
+        # Initialize workflow if not already done
+        if not state.get("workflow_started"):
+            state["workflow_started"] = True
+            state["workflow_start_time"] = datetime.now().isoformat()
+            state["status"] = "processing"
+            logger.info("Workflow initialized by coordinator")
+        
+        # Determine first agent to run based on document state
+        document = state.get("document", {})
+        
+        # If document has no content yet, start with ingestion
+        if not document.get("content") or not document.get("content").strip():
+            state["current_agent"] = "ingestion"
+            state["next_agent"] = "ingestion"
+            logger.info("Coordinator routing to ingestion (no content)")
+        
+        # If document has content but no type, start with classification
+        elif not state.get("document_type"):
+            state["current_agent"] = "classification" 
+            state["next_agent"] = "classification"
+            logger.info("Coordinator routing to classification (has content, no type)")
+        
+        # If we have content and type, continue normal flow
+        else:
+            # Use coordinator_decision to determine next step
+            next_agent = coordinator_decision(state)
+            state["current_agent"] = next_agent
+            state["next_agent"] = next_agent
+            logger.info(f"Coordinator routing to {next_agent} (normal flow)")
+        
+        # Update coordinator metadata
+        state["coordinator_decisions"] = state.get("coordinator_decisions", [])
+        state["coordinator_decisions"].append({
+            "timestamp": datetime.now().isoformat(),
+            "decision": state["next_agent"],
+            "reasoning": f"Initial routing based on document state",
+            "document_has_content": bool(document.get("content")),
+            "document_has_type": bool(state.get("document_type"))
+        })
+        
+        logger.info(f"Coordinator completed: next_agent={state['next_agent']}")
+        return state
+        
+    except Exception as e:
+        error_msg = f"Coordinator agent failed: {str(e)}"
+        logger.error(error_msg)
+        
+        # Set error state but continue workflow
+        state["error_log"] = state.get("error_log", [])
+        state["error_log"].append(error_msg)
+        state["current_agent"] = "ingestion"  # Fallback to ingestion
+        state["next_agent"] = "ingestion"
+        
+        return state

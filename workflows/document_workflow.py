@@ -22,7 +22,7 @@ from agents.human_review_agent import human_review_agent
 from agents.audit_learning_agent import audit_learning_agent
 
 # Import coordinator
-from agents.coordinator_agent import coordinator_decision, should_interrupt_before_agent
+from agents.coordinator_agent import coordinator_decision, should_interrupt_before_agent, coordinator_agent
 
 # Import state schema
 from workflows.state_schema import DocumentProcessingState, WorkflowConfig
@@ -67,6 +67,9 @@ class DocumentProcessingWorkflow:
         # Create state graph
         workflow = StateGraph(DocumentProcessingState)
         
+        # Add coordinator as the first node
+        workflow.add_node("coordinator", coordinator_agent)
+        
         # Add all agent nodes
         workflow.add_node("ingestion", ingestion_agent)
         workflow.add_node("classification", classification_agent)
@@ -77,8 +80,25 @@ class DocumentProcessingWorkflow:
         workflow.add_node("human_review", human_review_agent)
         workflow.add_node("audit_learning", audit_learning_agent)
         
-        # Set entry point
-        workflow.set_entry_point("ingestion")
+        # Set entry point to coordinator
+        workflow.set_entry_point("coordinator")
+        
+        # Add routing from coordinator to first agent
+        workflow.add_conditional_edges(
+            "coordinator",
+            coordinator_decision,
+            {
+                "ingestion": "ingestion",
+                "classification": "classification",
+                "extraction": "extraction",
+                "validation": "validation",
+                "rule_evaluation": "rule_evaluation",
+                "anomaly_detection": "anomaly_detection",
+                "human_review": "human_review",
+                "audit_learning": "audit_learning",
+                "__end__": END
+            }
+        )
         
         # Add conditional routing using coordinator
         workflow.add_conditional_edges(
