@@ -1,0 +1,25 @@
+{
+  "dependencies": [
+    "requirements.txt"
+  ],
+  "graphs": {
+    "document_processor": "./workflows/document_workflow.py:get_workflow"
+  },
+  "env": {
+    "OPENAI_API_KEY": null,
+    "ANTHROPIC_API_KEY": null,
+    "LANGCHAIN_TRACING_V2": "true",
+    "LANGCHAIN_PROJECT": "document-processor",
+    "ENVIRONMENT": "production"
+  },
+  "dockerfile": "Dockerfile.langcloud",
+  "port": 8000,
+  "health_check": {
+    "path": "/health",
+    "interval": 30
+  },
+  "scaling": {
+    "min_instances": 1,
+    "max_instances": 3
+  }
+}
