@@ -40,7 +40,10 @@ except ImportError:
 # Configure LangSmith tracing
 import os
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-os.environ.setdefault("LANGCHAIN_PROJECT", "document-processor")
+os.environ.setdefault("LANGSMITH_TRACING", "true")
+os.environ.setdefault("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+os.environ.setdefault("LANGCHAIN_PROJECT", "pr-frosty-cloakroom-13")
+os.environ.setdefault("LANGSMITH_PROJECT", "pr-frosty-cloakroom-13")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
