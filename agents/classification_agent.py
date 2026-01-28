@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 DOCUMENT_TYPES = {
     "invoice": {
         "description": "Commercial invoice for goods or services",
-        "keywords": ["invoice", "bill", "amount due", "payment terms", "tax", "total", "subtotal"],
-        "patterns": ["invoice number", "due date", "billing address", "line items"]
+        "keywords": ["invoice", "bill", "amount due", "payment terms", "tax", "total", "subtotal", "due date", "vendor", "customer", "payment", "billing", "charge", "cost", "price", "fee", "amount", "balance", "receipt", "statement"],
+        "patterns": ["invoice number", "due date", "billing address", "line items", "invoice #", "inv #", "bill #", "amount:", "$", "total:", "subtotal:", "tax:", "due:", "from:", "to:", "vendor:", "customer:", "client:", "company:", "corp", "ltd", "llc", "inc"],
+        "file_indicators": ["invoice", "bill", "receipt", "statement", "charge"]
     },
     "contract": {
         "description": "Legal agreement between parties",
@@ -110,7 +111,7 @@ class DocumentClassifier:
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
     
-    async def classify_document(self, content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    async def classify_document(self, content: str, metadata: Dict[str, Any], invoice_bias: bool = False) -> Dict[str, Any]:
         """
         Classify document using LLM
         
@@ -123,7 +124,7 @@ class DocumentClassifier:
         """
         try:
             # Create classification prompt
-            prompt = self._create_classification_prompt(content, metadata)
+            prompt = self._create_classification_prompt(content, metadata, invoice_bias)
             
             # Get LLM response
             response = await self.llm.ainvoke(prompt)
@@ -136,9 +137,9 @@ class DocumentClassifier:
         except Exception as e:
             logger.error(f"LLM classification failed: {e}")
             # Fallback to rule-based classification
-            return self._fallback_classification(content, metadata)
+            return self._fallback_classification(content, metadata, invoice_bias)
     
-    def _create_classification_prompt(self, content: str, metadata: Dict[str, Any]) -> List:
+    def _create_classification_prompt(self, content: str, metadata: Dict[str, Any], invoice_bias: bool = False) -> List:
         """Create classification prompt for LLM"""
         
         # Truncate content if too long
@@ -170,6 +171,8 @@ Respond with a JSON object containing:
 - "key_indicators": list of specific content elements that influenced your decision
 
 Be precise and provide clear reasoning for your classification.
+
+{"IMPORTANT: This document shows strong indicators of being an INVOICE based on filename or content analysis. Give extra consideration to classifying it as 'invoice' unless clearly contradicted by the content." if invoice_bias else ""}
 """)
         
         human_message = HumanMessage(content=f"""
@@ -228,7 +231,7 @@ Classify this document and provide your analysis in the requested JSON format.
                 "key_indicators": []
             }
     
-    def _fallback_classification(self, content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def _fallback_classification(self, content: str, metadata: Dict[str, Any], invoice_bias: bool = False) -> Dict[str, Any]:
         """Fallback rule-based classification when LLM fails"""
         logger.info("Using fallback rule-based classification")
         
@@ -264,13 +267,22 @@ Classify this document and provide your analysis in the requested JSON format.
                 }
         
         # Determine best match
+        # Apply invoice bias if detected
+        if invoice_bias and "invoice" in scores:
+            scores["invoice"]["score"] += 5  # Boost invoice score significantly
+            logger.info(f"Applied invoice bias - boosted invoice score to {scores['invoice']['score']}")
+        
         if scores:
             best_type = max(scores.keys(), key=lambda k: scores[k]["score"])
             best_score = scores[best_type]["score"]
             
             # Calculate confidence based on score
             max_possible_score = len(DOCUMENT_TYPES[best_type]["keywords"]) + (len(DOCUMENT_TYPES[best_type]["patterns"]) * 2)
-            confidence = min(0.8, (best_score / max(max_possible_score, 1)) * 0.8 + 0.2)
+            confidence = min(0.9, (best_score / max(max_possible_score, 1)) * 0.8 + 0.2)
+            
+            # Boost confidence if invoice bias was applied and invoice was selected
+            if invoice_bias and best_type == "invoice":
+                confidence = min(0.95, confidence + 0.2)
             
             return {
                 "document_type": best_type,
@@ -322,6 +334,31 @@ async def classification_agent(state: DocumentProcessingState) -> DocumentProces
         if not ingestion_result or not ingestion_result["success"]:
             raise ValueError("Cannot classify document: ingestion failed or incomplete")
         
+        # Pre-classification check for obvious invoice indicators
+        content = state["document"]["content"]
+        filename = state["document"].get("filename", "")
+        
+        # Check filename for invoice indicators
+        filename_lower = filename.lower()
+        invoice_filename_indicators = ["invoice", "bill", "receipt", "statement", "inv"]
+        filename_suggests_invoice = any(indicator in filename_lower for indicator in invoice_filename_indicators)
+        
+        # Check content for strong invoice indicators
+        content_lower = content.lower()
+        strong_invoice_indicators = [
+            "invoice #", "invoice number", "inv #", "bill #", 
+            "amount due", "total due", "payment due", "balance due",
+            "invoice date", "due date", "billing date",
+            "vendor:", "customer:", "bill to:", "invoice to:",
+            "subtotal", "tax amount", "total amount", "$", "amount:", "total:", "cost:", "price:", "fee:"
+        ]
+        content_has_strong_indicators = sum(1 for indicator in strong_invoice_indicators if indicator in content_lower)
+        
+        # If filename suggests invoice OR content has multiple strong indicators, bias toward invoice
+        invoice_bias = filename_suggests_invoice or content_has_strong_indicators >= 2
+        
+        logger.info(f"Invoice detection - filename_suggests: {filename_suggests_invoice}, content_indicators: {content_has_strong_indicators}, bias: {invoice_bias}")
+        
         # Get document content and metadata
         content = state["document"]["content"]
         metadata = state["document"]["metadata"]
@@ -334,7 +371,7 @@ async def classification_agent(state: DocumentProcessingState) -> DocumentProces
         classifier = DocumentClassifier(llm_config)
         
         # Perform classification
-        classification_result = await classifier.classify_document(content, metadata)
+        classification_result = await classifier.classify_document(content, metadata, invoice_bias)
         
         # Update document type in state
         state["document_type"] = classification_result["document_type"]
