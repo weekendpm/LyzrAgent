@@ -195,7 +195,16 @@ def create_initial_state(
         ),
         
         # Agent results (all None initially)
-        ingestion_result=None,
+        # For direct text processing, simulate successful ingestion
+        ingestion_result={
+            "success": True,
+            "content_extracted": True,
+            "content_length": len(content),
+            "processing_time": 0.001,
+            "metadata_extracted": metadata or {},
+            "confidence": 1.0,
+            "message": "Direct text input - ingestion simulated"
+        } if content else None,
         classification_result=None,
         extraction_result=None,
         validation_result=None,

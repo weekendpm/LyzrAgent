@@ -27,8 +27,8 @@ class LLMSettings(BaseSettings):
     """LLM configuration settings"""
     
     # OpenAI settings
-    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4", env="OPENAI_MODEL")
+    openai_api_key: Optional[str] = Field(default=None, env="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")
+    openai_model: str = Field(default="gpt-4o-mini", env="OPENAI_MODEL")
     openai_temperature: float = Field(default=0.1, env="OPENAI_TEMPERATURE")
     openai_max_tokens: int = Field(default=4000, env="OPENAI_MAX_TOKENS")
     

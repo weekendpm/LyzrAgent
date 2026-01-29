@@ -20,101 +20,8 @@ from workflows.state_schema import DocumentProcessingState, AgentResult, add_age
 logger = logging.getLogger(__name__)
 
 
-# Extraction schemas for different document types
-EXTRACTION_SCHEMAS = {
-    "invoice": {
-        "fields": {
-            "invoice_number": {"type": "string", "description": "Invoice number or ID"},
-            "invoice_date": {"type": "date", "description": "Date of invoice"},
-            "due_date": {"type": "date", "description": "Payment due date"},
-            "vendor_name": {"type": "string", "description": "Name of vendor/supplier"},
-            "vendor_address": {"type": "string", "description": "Vendor address"},
-            "customer_name": {"type": "string", "description": "Customer/buyer name"},
-            "customer_address": {"type": "string", "description": "Customer address"},
-            "line_items": {"type": "array", "description": "List of invoice line items"},
-            "subtotal": {"type": "number", "description": "Subtotal amount"},
-            "tax_amount": {"type": "number", "description": "Tax amount"},
-            "total_amount": {"type": "number", "description": "Total amount due"},
-            "currency": {"type": "string", "description": "Currency code"},
-            "payment_terms": {"type": "string", "description": "Payment terms"}
-        }
-    },
-    "contract": {
-        "fields": {
-            "contract_title": {"type": "string", "description": "Title of the contract"},
-            "parties": {"type": "array", "description": "List of contracting parties"},
-            "effective_date": {"type": "date", "description": "Contract effective date"},
-            "expiration_date": {"type": "date", "description": "Contract expiration date"},
-            "contract_value": {"type": "number", "description": "Total contract value"},
-            "key_terms": {"type": "array", "description": "Key contract terms"},
-            "governing_law": {"type": "string", "description": "Governing law jurisdiction"},
-            "signatures": {"type": "array", "description": "Signature information"},
-            "renewal_terms": {"type": "string", "description": "Renewal terms if any"}
-        }
-    },
-    "resume": {
-        "fields": {
-            "full_name": {"type": "string", "description": "Full name of candidate"},
-            "email": {"type": "string", "description": "Email address"},
-            "phone": {"type": "string", "description": "Phone number"},
-            "address": {"type": "string", "description": "Address"},
-            "work_experience": {"type": "array", "description": "Work experience entries"},
-            "education": {"type": "array", "description": "Education entries"},
-            "skills": {"type": "array", "description": "Skills and competencies"},
-            "certifications": {"type": "array", "description": "Certifications"},
-            "languages": {"type": "array", "description": "Languages spoken"},
-            "summary": {"type": "string", "description": "Professional summary"}
-        }
-    },
-    "financial_statement": {
-        "fields": {
-            "company_name": {"type": "string", "description": "Company name"},
-            "statement_type": {"type": "string", "description": "Type of financial statement"},
-            "period_ending": {"type": "date", "description": "Period ending date"},
-            "total_assets": {"type": "number", "description": "Total assets"},
-            "total_liabilities": {"type": "number", "description": "Total liabilities"},
-            "total_equity": {"type": "number", "description": "Total equity"},
-            "revenue": {"type": "number", "description": "Total revenue"},
-            "net_income": {"type": "number", "description": "Net income"},
-            "cash_flow": {"type": "number", "description": "Cash flow"},
-            "currency": {"type": "string", "description": "Currency"}
-        }
-    },
-    "medical_record": {
-        "fields": {
-            "patient_name": {"type": "string", "description": "Patient full name"},
-            "patient_id": {"type": "string", "description": "Patient ID or MRN"},
-            "date_of_birth": {"type": "date", "description": "Patient date of birth"},
-            "visit_date": {"type": "date", "description": "Visit or record date"},
-            "diagnosis": {"type": "array", "description": "Diagnoses"},
-            "medications": {"type": "array", "description": "Medications prescribed"},
-            "procedures": {"type": "array", "description": "Procedures performed"},
-            "physician": {"type": "string", "description": "Attending physician"},
-            "vital_signs": {"type": "object", "description": "Vital signs measurements"}
-        }
-    },
-    "email": {
-        "fields": {
-            "sender": {"type": "string", "description": "Email sender"},
-            "recipients": {"type": "array", "description": "Email recipients"},
-            "subject": {"type": "string", "description": "Email subject"},
-            "date_sent": {"type": "datetime", "description": "Date and time sent"},
-            "body": {"type": "string", "description": "Email body content"},
-            "attachments": {"type": "array", "description": "Attachment names"},
-            "priority": {"type": "string", "description": "Email priority"},
-            "thread_id": {"type": "string", "description": "Email thread ID"}
-        }
-    },
-    "other": {
-        "fields": {
-            "title": {"type": "string", "description": "Document title"},
-            "author": {"type": "string", "description": "Document author"},
-            "date": {"type": "date", "description": "Document date"},
-            "key_points": {"type": "array", "description": "Key points or topics"},
-            "summary": {"type": "string", "description": "Document summary"}
-        }
-    }
-}
+# Dynamic extraction - NO hardcoded schemas
+# The agent intelligently discovers and extracts fields based on document content
 
 
 class DataExtractor:
@@ -160,71 +67,154 @@ class DataExtractor:
             Extracted structured data
         """
         try:
-            # Get extraction schema for document type
-            schema = EXTRACTION_SCHEMAS.get(document_type, EXTRACTION_SCHEMAS["other"])
-            
-            # Create extraction prompt
-            prompt = self._create_extraction_prompt(content, document_type, schema, metadata)
+            # Dynamic extraction - let AI discover the fields based on document type
+            prompt = self._create_dynamic_extraction_prompt(content, document_type, metadata)
             
             # Get LLM response
             response = await self.llm.ainvoke(prompt)
             
-            # Parse response
-            result = self._parse_extraction_response(response.content, schema)
+            # Parse dynamic response
+            result = self._parse_dynamic_extraction_response(response.content, document_type)
             
             return result
         
         except Exception as e:
             logger.error(f"LLM extraction failed: {e}")
-            # Fallback to rule-based extraction
+            # Fallback to basic extraction
             return self._fallback_extraction(content, document_type, metadata)
     
-    def _create_extraction_prompt(self, content: str, document_type: str, schema: Dict[str, Any], metadata: Dict[str, Any]) -> List:
-        """Create extraction prompt for LLM"""
+    def _create_dynamic_extraction_prompt(self, content: str, document_type: str, metadata: Dict[str, Any]) -> List:
+        """Create dynamic extraction prompt - AI discovers fields intelligently"""
         
         # Truncate content if too long
         max_content_length = 4000
         if len(content) > max_content_length:
             content = content[:max_content_length] + "... [truncated]"
         
-        # Create field descriptions
-        field_descriptions = []
-        for field_name, field_info in schema["fields"].items():
-            field_descriptions.append(f"- {field_name} ({field_info['type']}): {field_info['description']}")
-        
         system_message = SystemMessage(content=f"""
-You are a data extraction expert. Your task is to extract structured information from a {document_type} document.
+You are an intelligent document processing agent in a horizontal, self-learning platform. Your role is to DYNAMICALLY analyze ANY document type and extract ALL relevant structured information.
 
-Extract the following fields:
-{chr(10).join(field_descriptions)}
+DYNAMIC EXTRACTION PRINCIPLES:
+1. Intelligently identify what TYPE of document this is
+2. Discover ALL key fields present in the document (don't rely on predefined schemas)
+3. Extract field names and values as they appear in the document
+4. Identify relationships between entities
+5. Recognize patterns (dates, amounts, names, IDs, etc.)
+6. Understand document purpose and extract accordingly
 
-Instructions:
-1. Extract only information that is explicitly present in the document
-2. Use null for fields that are not found or unclear
-3. For dates, use ISO format (YYYY-MM-DD) or (YYYY-MM-DD HH:MM:SS) for datetime
-4. For arrays, provide a list of items
-5. For numbers, extract numeric values without currency symbols
-6. Be precise and accurate - don't infer information that isn't clearly stated
+OUTPUT FORMAT - Return a JSON with this structure:
+{{
+  "document_analysis": {{
+    "identified_type": "the specific document type you identified",
+    "confidence": 0.0-1.0,
+    "primary_purpose": "what this document is for"
+  }},
+  "extracted_fields": {{
+    // ALL fields you discovered with their values
+    // Use the field names as they appear in the document
+    // Example: "invoice_number", "patient_name", "passport_number", etc.
+  }},
+  "entities": {{
+    "people": [],
+    "organizations": [],
+    "locations": []
+  }},
+  "temporal_data": {{
+    "dates": [],
+    "deadlines": [],
+    "periods": []
+  }},
+  "financial_data": {{
+    "amounts": [],
+    "currencies": [],
+    "transactions": []
+  }},
+  "key_insights": {{
+    "summary": "2-3 sentence overview",
+    "key_points": ["critical info point 1", "point 2", ...],
+    "action_items": ["required actions if any"],
+    "status": "document status if applicable"
+  }},
+  "metadata": {{
+    // Any additional structured information you extracted
+  }}
+}}
 
-Respond with a JSON object containing the extracted fields. Include a "confidence" field (0.0-1.0) indicating your confidence in the extraction accuracy.
+EXTRACTION GUIDELINES:
+- Be thorough - extract EVERYTHING of value
+- Use actual field names from the document (e.g., "Invoice Number", "Passport No", "Patient ID")
+- Identify ALL entities (people, companies, locations)
+- Extract ALL dates and understand their meaning
+- Extract ALL monetary values and quantities
+- Identify document status and any actions needed
+- Generate an intelligent summary
+- Don't force a schema - adapt to what the document contains
+- If a field type is unclear, extract it anyway and let validation handle it
+
+INTELLIGENCE REQUIREMENTS:
+- Understand context (e.g., "Net 30" means payment terms)
+- Recognize synonyms (e.g., "vendor", "supplier", "seller" all mean the same)
+- Extract implicit information (e.g., if there's a "Bill To" and "Ship To", those are entities)
+- Identify hierarchies (e.g., line items belong to an invoice)
+- Recognize document-specific patterns (invoices have totals, passports have expiry dates, etc.)
+
+Remember: You are NOT limited to predefined fields. Discover and extract ALL relevant information.
 """)
         
         human_message = HumanMessage(content=f"""
-Extract structured data from this {document_type} document:
+Analyze and extract ALL structured information from this document:
 
-METADATA:
+DOCUMENT CONTEXT:
+- Classified as: {document_type}
 - File type: {metadata.get('file_type', 'unknown')}
 - Content length: {metadata.get('content_length', 0)} characters
 
-CONTENT:
+DOCUMENT CONTENT:
 {content}
 
-Please extract the requested fields and provide the result as a JSON object with a confidence score.
+Perform dynamic extraction - discover all fields, entities, dates, amounts, and relationships. Return complete structured data as JSON.
 """)
         
         return [system_message, human_message]
     
-    def _parse_extraction_response(self, response: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_dynamic_extraction_response(self, response: str, document_type: str) -> Dict[str, Any]:
+        """Parse dynamic extraction response without enforcing a fixed schema"""
+        try:
+            # Extract JSON from response
+            start_idx = response.find('{')
+            end_idx = response.rfind('}') + 1
+            
+            if start_idx != -1 and end_idx != -1:
+                json_str = response[start_idx:end_idx]
+                result = json.loads(json_str)
+                
+                # Return the dynamically extracted data
+                return {
+                    "extraction_success": True,
+                    "document_type": document_type,
+                    "identified_type": result.get("document_analysis", {}).get("identified_type", document_type),
+                    "confidence": result.get("document_analysis", {}).get("confidence", 0.7),
+                    "extracted_fields": result.get("extracted_fields", {}),
+                    "entities": result.get("entities", {}),
+                    "temporal_data": result.get("temporal_data", {}),
+                    "financial_data": result.get("financial_data", {}),
+                    "key_insights": result.get("key_insights", {}),
+                    "metadata": result.get("metadata", {}),
+                    "raw_extraction": result
+                }
+            else:
+                raise ValueError("No JSON found in response")
+        
+        except Exception as e:
+            logger.error(f"Failed to parse dynamic extraction response: {e}")
+            return {
+                "extraction_success": False,
+                "error": f"Failed to parse LLM response: {str(e)}",
+                "confidence": 0.1,
+                "extracted_fields": {}
+            }
+    
+    def _parse_extraction_response_legacy(self, response: str, schema: Dict[str, Any]) -> Dict[str, Any]:
         """Parse LLM extraction response"""
         try:
             # Try to extract JSON from response
@@ -370,11 +360,24 @@ async def extraction_agent(state: DocumentProcessingState) -> DocumentProcessing
         llm_config = state.get("llm_config", {})
         extractor = DataExtractor(llm_config)
         
-        # Perform extraction
+        # Perform dynamic extraction
         extraction_result = await extractor.extract_data(content, document_type, metadata)
         
-        # Update extracted data in state
-        state["extracted_data"] = extraction_result.get("extracted_fields", {})
+        # Store complete dynamic extraction result
+        # This preserves all discovered fields, entities, temporal data, insights, etc.
+        state["extracted_data"] = {
+            **extraction_result.get("extracted_fields", {}),  # All discovered fields
+            "_insights": extraction_result.get("key_insights", {}),  # Key insights (summary, key_points, actions)
+            "_entities": extraction_result.get("entities", {}),  # Discovered entities
+            "_temporal": extraction_result.get("temporal_data", {}),  # All dates and temporal info
+            "_financial": extraction_result.get("financial_data", {}),  # All amounts and financial data
+            "_metadata": extraction_result.get("metadata", {}),  # Additional metadata
+            "_analysis": {
+                "identified_type": extraction_result.get("identified_type", document_type),
+                "classified_as": document_type,
+                "extraction_method": "dynamic_ai"
+            }
+        }
         
         # Calculate processing time
         processing_time = time.time() - start_time
@@ -383,12 +386,14 @@ async def extraction_agent(state: DocumentProcessingState) -> DocumentProcessing
         result = AgentResult(
             success=extraction_result.get("extraction_success", False),
             result={
-                "extracted_fields": extraction_result.get("extracted_fields", {}),
-                "field_count": len(extraction_result.get("extracted_fields", {})),
-                "non_null_fields": len([v for v in extraction_result.get("extracted_fields", {}).values() if v is not None]),
-                "extraction_method": extraction_result.get("extraction_method", "llm"),
+                "extracted_fields_count": len(extraction_result.get("extracted_fields", {})),
+                "entities_found": extraction_result.get("entities", {}),
+                "temporal_data": extraction_result.get("temporal_data", {}),
+                "financial_data": extraction_result.get("financial_data", {}),
+                "key_insights": extraction_result.get("key_insights", {}),
+                "extraction_method": "dynamic",
                 "document_type": document_type,
-                "schema_used": document_type
+                "identified_as": extraction_result.get("identified_type", document_type)
             },
             error=extraction_result.get("error"),
             confidence_score=extraction_result.get("confidence", 0.5),

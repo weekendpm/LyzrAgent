@@ -49,6 +49,69 @@ os.environ.setdefault("LANGSMITH_PROJECT", "pr-frosty-cloakroom-13")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Pydantic models for API responses
+class ProcessingResponse(BaseModel):
+    success: bool
+    document_id: str
+    workflow_id: str
+    thread_id: str
+    message: str
+    status: str
+    requires_human_review: bool = False
+
+class StatusResponse(BaseModel):
+    success: bool
+    document_id: str
+    workflow_id: str
+    status: str
+    is_complete: bool = False
+    current_agent: Optional[str] = None
+    processing_time: float = 0.0
+    error: Optional[str] = None
+
+class ResultsResponse(BaseModel):
+    success: bool
+    document_id: str
+    workflow_id: str
+    status: str
+    extracted_data: Dict[str, Any] = {}
+    validated_data: Dict[str, Any] = {}
+    business_rules_applied: List[Dict[str, Any]] = []
+    anomalies_detected: List[Dict[str, Any]] = []
+    human_review_required: bool = False
+    human_review_details: Optional[Dict[str, Any]] = None
+    processing_time: float = 0.0
+    confidence_scores: Dict[str, float] = {}
+
+# Standard LangGraph Cloud compatible models
+class InvokeRequest(BaseModel):
+    input: Dict[str, Any]
+    config: Optional[Dict[str, Any]] = None
+
+class RunResponse(BaseModel):
+    run_id: str
+    status: str
+    input: Dict[str, Any]
+    output: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class StreamResponse(BaseModel):
+    message: str
+    websocket_url: str
+    run_id: str
+    document_id: str
+
+# Note: Extraction agent now outputs universal semantic schema
+# All document types return consistent fields:
+# - document_id, document_title, document_type
+# - primary_date, secondary_date
+# - primary_entity, secondary_entity  
+# - monetary_value, currency
+# - key_points, summary, entities, dates, amounts, action_items, status
+# - metadata (document-specific details)
+
 # Create FastAPI app
 app = FastAPI(
     title="Document Processing Platform",
@@ -362,7 +425,7 @@ async def get_document_status(
         raise HTTPException(status_code=500, detail=f"Failed to get document status: {str(e)}")
 
 
-@app.get("/results/{thread_id}", response_model=ProcessingResultResponse)
+@app.get("/results/{thread_id}", response_model=ResultsResponse)
 async def get_processing_results(
     thread_id: str,
     workflow: DocumentProcessingWorkflow = Depends(get_workflow_instance)
@@ -388,6 +451,22 @@ async def get_processing_results(
         if state.get("completed_at") and state.get("started_at"):
             total_time = (state["completed_at"] - state["started_at"]).total_seconds()
         
+        # Get human review details if required
+        human_review_details = None
+        if state.get("requires_human_review", False):
+            human_review_result = state.get("human_review_result", {})
+            review_request = human_review_result.get("result", {}).get("review_request")
+            
+            if review_request:
+                human_review_details = {
+                    "review_id": review_request.get("review_id"),
+                    "reason": review_request.get("reason"),
+                    "priority": review_request.get("priority"),
+                    "required_actions": review_request.get("required_actions", []),
+                    "context": review_request.get("context", {}),
+                    "due_date": review_request.get("due_date").isoformat() if review_request.get("due_date") else None
+                }
+        
         return ProcessingResultResponse(
             success=state.get("status") in ["completed", "human_review_completed"],
             document_id=state["document"]["id"],
@@ -398,6 +477,7 @@ async def get_processing_results(
             business_rules_applied=state.get("business_rules_applied", []),
             anomalies_detected=state.get("anomalies_detected", []),
             human_review_required=state.get("requires_human_review", False),
+            human_review_details=human_review_details,
             processing_time=total_time,
             confidence_scores=state.get("confidence_scores", {})
         )
