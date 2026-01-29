@@ -124,21 +124,11 @@ app = FastAPI(
 # Add CORS middleware - Production ready
 def get_cors_origins():
     """Get CORS origins for production and Lovable integration"""
-    if os.environ.get("ENVIRONMENT") == "production":
-        return [
-            "https://*.lovable.dev",  # Lovable preview URLs
-            "https://*.lovableproject.com",  # Lovable production URLs
-            "https://lovable.dev",  # Lovable main domain
-            # Add your client's domains here
-        ]
-    else:
-        return [
-            "http://localhost:3000",  # Local development
-            "https://*.lovable.dev",  # Lovable preview URLs
-            "https://*.lovableproject.com",  # Lovable production URLs
-            "https://lovable.dev",  # Lovable main domain
-            "*"  # Allow all for development
-        ]
+    # Always allow all origins for now to fix CORS issues
+    # Railway deployment needs broad CORS support for Lovable integration
+    return [
+        "*"  # Allow all origins - needed for Lovable integration
+    ]
 
 app.add_middleware(
     CORSMiddleware,
