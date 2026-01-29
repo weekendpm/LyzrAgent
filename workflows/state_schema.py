@@ -154,9 +154,10 @@ class WorkflowConfig(BaseModel):
     max_file_size: int = 50 * 1024 * 1024  # 50MB
     
     # Human Review Configuration
-    auto_approve_threshold: float = 0.95
-    require_review_threshold: float = 0.6
-    escalation_threshold: float = 0.3
+    # Lowered thresholds to reduce false positives for human review
+    auto_approve_threshold: float = 0.85
+    require_review_threshold: float = 0.4
+    escalation_threshold: float = 0.2
 
 
 def create_initial_state(

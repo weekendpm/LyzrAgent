@@ -416,7 +416,8 @@ class BusinessRuleEngine:
                                         doc_type: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Check extraction confidence threshold"""
         extraction_confidence = metadata.get("extraction_confidence", 1.0)
-        threshold = 0.7
+        # Lowered threshold from 0.7 to 0.4 to reduce false positives for human review
+        threshold = 0.4
         
         if extraction_confidence < threshold:
             return {

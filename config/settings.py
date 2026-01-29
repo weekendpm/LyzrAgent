@@ -60,11 +60,11 @@ class ProcessingSettings(BaseSettings):
     enable_ocr: bool = Field(default=True, env="ENABLE_OCR")
     tesseract_path: Optional[str] = Field(default=None, env="TESSERACT_PATH")
     
-    # Processing thresholds
-    confidence_threshold: float = Field(default=0.8, env="CONFIDENCE_THRESHOLD")
-    auto_approve_threshold: float = Field(default=0.95, env="AUTO_APPROVE_THRESHOLD")
-    require_review_threshold: float = Field(default=0.6, env="REQUIRE_REVIEW_THRESHOLD")
-    escalation_threshold: float = Field(default=0.3, env="ESCALATION_THRESHOLD")
+    # Processing thresholds - Lowered to reduce false positives for human review
+    confidence_threshold: float = Field(default=0.5, env="CONFIDENCE_THRESHOLD")
+    auto_approve_threshold: float = Field(default=0.85, env="AUTO_APPROVE_THRESHOLD")
+    require_review_threshold: float = Field(default=0.4, env="REQUIRE_REVIEW_THRESHOLD")
+    escalation_threshold: float = Field(default=0.2, env="ESCALATION_THRESHOLD")
     
     # Anomaly detection
     enable_anomaly_detection: bool = Field(default=True, env="ENABLE_ANOMALY_DETECTION")
