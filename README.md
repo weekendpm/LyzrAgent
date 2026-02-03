@@ -1,6 +1,8 @@
 # 🚀 Document Processing Platform
 
 A sophisticated document processing platform built with LangGraph, featuring AI agents and human-in-the-loop capabilities for intelligent document analysis, extraction, and validation.
+<img width="1702" height="1011" alt="image" src="https://github.com/user-attachments/assets/01fe5e32-b645-49e0-af24-c6140cdfa07b" />
+<img width="1720" height="1001" alt="image" src="https://github.com/user-attachments/assets/5a06580b-d678-467b-b4a9-9a1ede0acdaa" />
 
 ## 🌟 Features
 
@@ -92,10 +94,6 @@ python test_workflow.py
 ```bash
 uvicorn api.main:app --reload --port 8000
 ```
-
-3. **Access the API**
-- API Documentation: http://localhost:8000/docs
-- Health Check: http://localhost:8000/health
 
 ## 📚 Usage Examples
 
